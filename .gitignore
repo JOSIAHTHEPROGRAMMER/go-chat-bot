@@ -1,0 +1,66 @@
+# --- Go build files ---
+/bin/
+/build/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go modules
+/go.sum
+/go.work
+/go.work.sum
+
+# Compiled binaries
+*.out
+
+# --- Temporary files ---
+*.log
+*.cache
+*.tmp
+
+# --- Environment files ---
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+
+# Backup files
+*~
+*.bak
+*.old
+
+# --- IDE / Editor ---
+# VSCode
+.vscode/
+.history/
+*.code-workspace
+
+# JetBrains
+.idea/
+*.iml
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- RAG Data ---
+data/readmes/
+data/embeddings.json
+data/chats.json
+data/*.db
+data/*.json
+
+# --- Mongo Local ---
+/data/db/
+
+# --- Coverage ---
+coverage.out
+profile.out
+
+# --- Tests ---
+/tmp/
+test-results/

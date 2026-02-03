@@ -49,14 +49,14 @@ Send a question to the chatbot and receive a generated response.
 **Request:**
 ```json
 {
-  "message": "What projects are you most proud of?"
+  "message": "What projects use Go"
 }
 ```
 
 **Response:**
 ```json
 {
-  "reply": "One of the projects I'm most proud of is..."
+  "reply": "The projects that used Go are..."
 }
 ```
 
@@ -68,8 +68,3 @@ Send a question to the chatbot and receive a generated response.
 - Retrieval-Augmented Generation (RAG)
 - Cosine similarity for semantic search
 
-## Use Cases
-
-- Portfolio chatbot for a personal website
-- Project knowledge assistant
-- Demonstration of RAG and LLM integration in Go

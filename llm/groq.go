@@ -8,23 +8,12 @@ import (
 	"os"
 )
 
-type GroqRequest struct {
-	Model    string `json:"model"`
-	Messages []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	} `json:"messages"`
-}
+type GroqProvider struct{}
 
-type GroqResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}
+func (g *GroqProvider) Name() string { return "groq" }
 
-func CallGroq(prompt string) (string, error) {
+// Complete sends the given prompt to Groq and returns the generated response text.
+func (g *GroqProvider) Complete(prompt string) (string, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
 	model := os.Getenv("GROQ_MODEL")
 
@@ -32,13 +21,10 @@ func CallGroq(prompt string) (string, error) {
 		return "", fmt.Errorf("missing GROQ_API_KEY or GROQ_MODEL in env")
 	}
 
-	reqBody := GroqRequest{
+	reqBody := groqRequest{
 		Model: model,
-		Messages: []struct {
-			Role    string "json:\"role\""
-			Content string "json:\"content\""
-		}{
-			{"user", prompt},
+		Messages: []groqMessage{
+			{Role: "user", Content: prompt},
 		},
 	}
 
@@ -52,19 +38,36 @@ func CallGroq(prompt string) (string, error) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	res, err := client.Do(req)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer res.Body.Close()
 
-	var groqResponse GroqResponse
-	json.NewDecoder(res.Body).Decode(&groqResponse)
+	var out groqResponse
+	json.NewDecoder(res.Body).Decode(&out)
 
-	if len(groqResponse.Choices) == 0 {
+	if len(out.Choices) == 0 {
 		return "", fmt.Errorf("no response from Groq")
 	}
 
-	return groqResponse.Choices[0].Message.Content, nil
+	return out.Choices[0].Message.Content, nil
+}
+
+// -- internal types --
+
+type groqRequest struct {
+	Model    string        `json:"model"`
+	Messages []groqMessage `json:"messages"`
+}
+
+type groqMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type groqResponse struct {
+	Choices []struct {
+		Message groqMessage `json:"message"`
+	} `json:"choices"`
 }

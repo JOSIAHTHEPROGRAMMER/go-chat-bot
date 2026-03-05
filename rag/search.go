@@ -6,11 +6,9 @@ import (
 	"math"
 	"os"
 	"sort"
-
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
 )
 
-// Load embeddings from JSON
+// LoadEmbeddings reads the persisted embeddings from disk.
 func LoadEmbeddings() ([]Doc, error) {
 	dataBytes, err := os.ReadFile("./data/embeddings.json")
 	if err != nil {
@@ -23,13 +21,13 @@ func LoadEmbeddings() ([]Doc, error) {
 	return docs, nil
 }
 
-// Cosine similarity
+// cosineSimilarity returns the cosine similarity between two equal-length vectors.
 func cosineSimilarity(a, b []float32) float32 {
 	if len(a) != len(b) {
 		return 0
 	}
 	var dot, normA, normB float32
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		dot += a[i] * b[i]
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
@@ -40,43 +38,44 @@ func cosineSimilarity(a, b []float32) float32 {
 	return dot / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
 }
 
-// SearchTopK returns the top-k closest docs
+// SearchTopK returns the k most semantically similar docs to the query.
 func SearchTopK(query string, k int) ([]Doc, error) {
 	docs, err := LoadEmbeddings()
 	if err != nil {
 		return nil, err
 	}
 
-	// Generate query embedding
-	embeddingStr, _ := llm.CallGroq("Embed this text as vector (comma-separated floats):\n" + query)
-	queryVec := parseEmbeddingString(embeddingStr)
+	queryVec, err := embedder.Embed(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed query: %w", err)
+	}
 
-	// Compute similarity
 	type scoredDoc struct {
-		Doc   Doc
-		Score float32
-	}
-	var scored []scoredDoc
-	for _, d := range docs {
-		score := cosineSimilarity(queryVec, d.Embedding)
-		scored = append(scored, scoredDoc{Doc: d, Score: score})
+		doc   Doc
+		score float32
 	}
 
-	// Sort descending
+	scored := make([]scoredDoc, 0, len(docs))
+	for _, d := range docs {
+		scored = append(scored, scoredDoc{
+			doc:   d,
+			score: cosineSimilarity(queryVec, d.Embedding),
+		})
+	}
+
 	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].Score > scored[j].Score
+		return scored[i].score > scored[j].score
 	})
 
-	// Return top-k
-	var top []Doc
+	top := make([]Doc, 0, k)
 	for i := 0; i < k && i < len(scored); i++ {
-		top = append(top, scored[i].Doc)
+		top = append(top, scored[i].doc)
 	}
 
 	return top, nil
 }
 
-// Get concatenated content for context
+// GetContextString concatenates doc content for prompt injection.
 func GetContextString(docs []Doc) string {
 	context := ""
 	for _, d := range docs {

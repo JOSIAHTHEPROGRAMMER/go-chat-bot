@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/fetcher"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
 )
+
+// embedder is the package-level embedder instance. We use Gemini for embedding, but this can be swapped out if needed.
+var embedder llm.Embedder = &llm.GeminiEmbedder{}
 
 type Doc struct {
 	Path      string    `json:"path"`
@@ -16,9 +18,8 @@ type Doc struct {
 	Embedding []float32 `json:"embedding"`
 }
 
-// EmbedAllReadmes fetches all READMEs from GitHub, embeds them, and saves to JSON
+// EmbedAllReadmes fetches all READMEs from GitHub, embeds them, and saves to JSON.
 func EmbedAllReadmes() ([]Doc, error) {
-	// 1. Fetch READMEs
 	rawDocs, err := fetcher.FetchAllReadmes()
 	if err != nil {
 		return nil, err
@@ -26,33 +27,29 @@ func EmbedAllReadmes() ([]Doc, error) {
 
 	var docs []Doc
 
-	// 2️ Embed each README
 	for _, d := range rawDocs {
-		prompt := "Embed this text as vector (comma-separated floats):\n" + d.Content
-		embeddingStr, _ := llm.CallGroq(prompt)
-		vector := parseEmbeddingString(embeddingStr)
+		vec, err := embedder.Embed(d.Content)
+		if err != nil {
+			fmt.Printf("embedding failed for %s: %v\n", d.Path, err)
+			continue
+		}
 
 		docs = append(docs, Doc{
 			Path:      d.Path,
 			Content:   d.Content,
-			Embedding: vector,
+			Embedding: vec,
 		})
 	}
 
-	// 3️ Save embeddings to JSON
-	dataBytes, _ := json.MarshalIndent(docs, "", "  ")
-	os.WriteFile("./data/embeddings.json", dataBytes, 0644)
+	dataBytes, err := json.MarshalIndent(docs, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	if err := os.WriteFile("./data/embeddings.json", dataBytes, 0644); err != nil {
+		return nil, err
+	}
 
 	fmt.Printf("Generated embeddings for %d documents\n", len(docs))
 	return docs, nil
-}
-
-// parseEmbeddingString converts "0.1,0.2,0.3" -> []float32
-func parseEmbeddingString(s string) []float32 {
-	parts := strings.Split(s, ",")
-	vec := make([]float32, len(parts))
-	for i, p := range parts {
-		fmt.Sscanf(strings.TrimSpace(p), "%f", &vec[i])
-	}
-	return vec
 }

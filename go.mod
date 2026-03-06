@@ -1,4 +1,4 @@
-module github.com/JOSIAHTHEPROGRAMMER/portfolio-backend
+module github.com/JOSIAHTHEPROGRAMMER/go-chat-bot
 
 go 1.25.4
 

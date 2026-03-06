@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/middleware"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/routes"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/session"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/config"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/middleware"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/rag"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/routes"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/session"
 	"github.com/joho/godotenv"
 )
 

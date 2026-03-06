@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/rag"
 )
 
 // techAliases maps a canonical technology name to GitHub language names that indicate its use.

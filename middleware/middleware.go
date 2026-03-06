@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/logger"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/logger"
 )
 
 // responseWriter wraps http.ResponseWriter to capture the status code for logging.

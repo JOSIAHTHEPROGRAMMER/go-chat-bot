@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/logger"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/planner"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/session"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/config"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/llm"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/logger"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/planner"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/session"
 )
 
 // StreamHandler is the streaming version of ChatHandler.

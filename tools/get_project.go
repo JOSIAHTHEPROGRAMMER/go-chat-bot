@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/rag"
 )
 
 // GetProjectTool retrieves a single project's README by name.

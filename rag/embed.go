@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/fetcher"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/fetcher"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/llm"
 )
 
 // embedder is the single embedding provider used across the rag package.

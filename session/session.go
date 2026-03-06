@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/llm"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"

@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/logger"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/tools"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/config"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/llm"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/logger"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/rag"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/tools"
 )
 
 // PlanType tells the route handler how the question was handled.

@@ -1,11 +1,13 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type GeminiProvider struct{}
@@ -17,8 +19,7 @@ func (g *GeminiProvider) Complete(prompt string) (string, error) {
 	return g.Chat([]Message{{Role: "user", Content: prompt}})
 }
 
-// Chat sends a full message history to Gemini and returns the assistant's reply.
-// Gemini uses "model" instead of "assistant" for the assistant role.
+// Chat sends a full message history and returns the complete response.
 func (g *GeminiProvider) Chat(messages []Message) (string, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	model := os.Getenv("GEMINI_MODEL")
@@ -27,19 +28,7 @@ func (g *GeminiProvider) Chat(messages []Message) (string, error) {
 		return "", fmt.Errorf("missing GEMINI_API_KEY or GEMINI_MODEL in env")
 	}
 
-	// Gemini uses "model" for assistant turns - map accordingly
-	contents := make([]geminiContent, len(messages))
-	for i, m := range messages {
-		role := m.Role
-		if role == "assistant" {
-			role = "model"
-		}
-		contents[i] = geminiContent{
-			Role:  role,
-			Parts: []geminiPart{{Text: m.Content}},
-		}
-	}
-
+	contents := toGeminiContents(messages)
 	reqBody := geminiRequest{Contents: contents}
 	bodyBytes, _ := json.Marshal(reqBody)
 
@@ -68,6 +57,83 @@ func (g *GeminiProvider) Chat(messages []Message) (string, error) {
 	}
 
 	return out.Candidates[0].Content.Parts[0].Text, nil
+}
+
+// Stream sends a full message history and writes tokens into out as they arrive.
+// Uses Gemini's streamGenerateContent endpoint which returns newline-delimited JSON.
+func (g *GeminiProvider) Stream(messages []Message, out chan<- string) error {
+	defer close(out)
+
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	model := os.Getenv("GEMINI_MODEL")
+
+	if apiKey == "" || model == "" {
+		return fmt.Errorf("missing GEMINI_API_KEY or GEMINI_MODEL in env")
+	}
+
+	contents := toGeminiContents(messages)
+	reqBody := geminiRequest{Contents: contents}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?key=%s",
+		model, apiKey,
+	)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	// Gemini streams as newline-delimited JSON objects inside an array
+	scanner := bufio.NewScanner(res.Body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip array brackets and empty lines
+		if line == "" || line == "[" || line == "]" || line == "," {
+			continue
+		}
+
+		// Each line is a full geminiResponse object
+		var chunk geminiResponse
+		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+			continue
+		}
+
+		if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
+			token := chunk.Candidates[0].Content.Parts[0].Text
+			if token != "" {
+				out <- token
+			}
+		}
+	}
+
+	return scanner.Err()
+}
+
+// toGeminiContents converts our Message slice to Gemini's content format.
+// Gemini uses "model" instead of "assistant" for assistant turns.
+func toGeminiContents(messages []Message) []geminiContent {
+	contents := make([]geminiContent, len(messages))
+	for i, m := range messages {
+		role := m.Role
+		if role == "assistant" {
+			role = "model"
+		}
+		contents[i] = geminiContent{
+			Role:  role,
+			Parts: []geminiPart{{Text: m.Content}},
+		}
+	}
+	return contents
 }
 
 // -- internal types --

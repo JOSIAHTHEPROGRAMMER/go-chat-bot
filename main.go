@@ -35,11 +35,10 @@ func main() {
 		fmt.Println("Loaded embeddings from disk into memory store")
 	}
 
-	// Periodically switch models and refresh embeddings
 	go autoUpdateRoutine()
 
-	// Wrap every route with the full middleware chain
 	http.HandleFunc("/chat", middleware.Chain(routes.ChatHandler))
+	http.HandleFunc("/stream", middleware.Chain(routes.StreamHandler))
 
 	fmt.Println("Server running on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

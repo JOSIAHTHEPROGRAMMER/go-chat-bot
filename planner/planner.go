@@ -129,7 +129,7 @@ func Build(ctx context.Context, question string, history []llm.Message, provider
 
 // buildRAGPlan runs similarity search and builds a RAG-based plan.
 func buildRAGPlan(ctx context.Context, question string, history []llm.Message) (Plan, error) {
-	docs, err := rag.SearchTopK(question, 3)
+	docs, err := rag.SearchTopK(question, 6)
 	if err != nil {
 		return Plan{}, fmt.Errorf("RAG search failed: %w", err)
 	}

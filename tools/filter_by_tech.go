@@ -8,6 +8,7 @@ import (
 )
 
 // techAliases maps a canonical technology name to GitHub language names that indicate its use.
+// GitHub uses title case e.g. "JavaScript", "TypeScript", "Python".
 var techAliases = map[string][]string{
 	"javascript": {"JavaScript", "TypeScript", "JSX", "TSX", "JS"},
 	"typescript": {"TypeScript", "TSX"},
@@ -27,6 +28,7 @@ var techAliases = map[string][]string{
 }
 
 // FilterByTechTool checks GitHub language stats first, then falls back to README keyword scan.
+// Returns project names with README snippets so the LLM can describe what each project does.
 type FilterByTechTool struct{}
 
 func (t *FilterByTechTool) Name() string { return "filter_by_tech" }
@@ -35,59 +37,62 @@ func (t *FilterByTechTool) Run(input string) (string, error) {
 	tech := strings.TrimSpace(strings.ToLower(input))
 	githubLangs := techAliases[tech]
 
-	var matches []string
-
+	var matchedDocs []rag.Doc
 	for _, doc := range rag.StoreAll() {
-		fmt.Printf("doc: %s languages: %v\n", doc.Path, doc.Languages)
-
 		if matchesTech(doc, tech, githubLangs) {
-			matches = append(matches, doc.Path)
+			matchedDocs = append(matchedDocs, doc)
 		}
 	}
 
-	if len(matches) == 0 {
-		return fmt.Sprintf(
-			"No projects in the repository dataset were confirmed to use %s based on GitHub language data.",
-			input,
-		), nil
+	if len(matchedDocs) == 0 {
+		return "", fmt.Errorf("no projects found using %q", input)
 	}
 
-	return fmt.Sprintf(
-		"Projects confirmed to use %s based on GitHub language data (%d total):\n- %s\n\nIMPORTANT: Only reference these exact project names in your answer. Do not add any projects not on this list.",
-		input,
-		len(matches),
-		strings.Join(matches, "\n- "),
-	), nil
+	// Build context with name + first 800 chars of README per match.
+	// 800 chars gives the LLM enough to describe what each project does
+	// without blowing the context window when many projects match.
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Projects that use %s (%d total):\n\n", input, len(matchedDocs)))
+
+	for _, doc := range matchedDocs {
+		sb.WriteString(fmt.Sprintf("### %s\n", doc.Path))
+		content := strings.TrimSpace(doc.Content)
+		if len(content) > 800 {
+			content = content[:800] + "..."
+		}
+		sb.WriteString(content)
+		sb.WriteString("\n\n")
+	}
+
+	// Instruction injected directly into prompt context to reinforce accuracy
+	sb.WriteString("IMPORTANT: Only reference the projects listed above. Describe each one using the context provided.")
+	return sb.String(), nil
 }
 
 // matchesTech returns true if a doc uses the given technology.
-// Checks GitHub language stats first, then falls back to README keyword scan.
+// Checks GitHub language stats first (exact), then falls back to README keyword scan.
 func matchesTech(doc rag.Doc, tech string, githubLangs []string) bool {
-
-	// Primary check: GitHub language stats
+	// Primary check: GitHub language stats are authoritative
 	if len(doc.Languages) > 0 {
 		for repoLang := range doc.Languages {
 			repoLangLower := strings.ToLower(repoLang)
-
 			for _, lang := range githubLangs {
 				if repoLangLower == strings.ToLower(lang) {
 					return true
 				}
 			}
 		}
-
+		// If we have language data and nothing matched, trust it
 		return false
 	}
 
-	// Fallback: scan README content if language data isn't available
+	// Fallback: scan README content if no language data is available
 	content := strings.ToLower(doc.Content)
 	keywords := append(githubLangs, tech)
-
 	for _, kw := range keywords {
 		if strings.Contains(content, strings.ToLower(kw)) {
 			return true
 		}
 	}
-
 	return false
 }

@@ -16,8 +16,8 @@ func (g *GeminiEmbedder) Embed(text string) ([]float32, error) {
 		return nil, fmt.Errorf("missing GEMINI_API_KEY in env")
 	}
 
+	// Request body - model goes in the URL only, not the body
 	reqBody := geminiEmbedRequest{
-		Model: "models/text-embedding-004",
 		Content: geminiEmbedContent{
 			Parts: []geminiEmbedPart{{Text: text}},
 		},
@@ -28,8 +28,9 @@ func (g *GeminiEmbedder) Embed(text string) ([]float32, error) {
 		return nil, err
 	}
 
+	// gemini-embedding-001 replaces text-embedding-004 and outputs 3072 dimensions
 	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=%s",
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=%s",
 		apiKey,
 	)
 
@@ -60,7 +61,6 @@ func (g *GeminiEmbedder) Embed(text string) ([]float32, error) {
 // -- internal types --
 
 type geminiEmbedRequest struct {
-	Model   string             `json:"model"`
 	Content geminiEmbedContent `json:"content"`
 }
 

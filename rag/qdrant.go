@@ -48,7 +48,7 @@ func (c *qdrantClient) do(method, path string, body any) (*http.Response, error)
 }
 
 // EnsureCollection creates the collection if it does not already exist.
-// Vector size 768 matches Gemini text-embedding-004 output dimensions.
+// Vector size 3072 matches gemini-embedding-001 output dimensions.
 func (c *qdrantClient) EnsureCollection() error {
 	path := fmt.Sprintf("/collections/%s", c.collection)
 
@@ -66,7 +66,7 @@ func (c *qdrantClient) EnsureCollection() error {
 	// Create it with cosine distance to match our previous similarity metric
 	payload := map[string]any{
 		"vectors": map[string]any{
-			"size":     768,
+			"size":     3072,
 			"distance": "Cosine",
 		},
 	}

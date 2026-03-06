@@ -20,6 +20,8 @@ func StoreAll() []Doc {
 
 // InitStore creates the Qdrant collection if it does not already exist.
 // Call this once at startup before any reads or writes.
+
 func InitStore() error {
+	client = newQdrantClient()
 	return client.EnsureCollection()
 }

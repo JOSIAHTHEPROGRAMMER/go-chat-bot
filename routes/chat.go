@@ -7,7 +7,7 @@ import (
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
-	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
+	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/planner"
 )
 
 type ChatRequest struct {
@@ -15,10 +15,10 @@ type ChatRequest struct {
 }
 
 type ChatResponse struct {
-	Answer string `json:"answer"`
+	Answer  string `json:"answer"`
+	UsedRAG bool   `json:"used_rag"` // useful for debugging and frontend transparency
 }
 
-// ChatHandler handles incoming chat requests, retrieves relevant context using RAG, and generates a response using the current LLM provider.
 func ChatHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -33,18 +33,7 @@ func ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Retrieve RAG context
-	docs, err := rag.SearchTopK(req.Question, 3)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "RAG error: %v", err)
-		return
-	}
-
-	context := rag.GetContextString(docs)
-	finalPrompt := fmt.Sprintf("You are a portfolio assistant.\n\nContext:\n%s\n\nQuestion:\n%s", context, req.Question)
-
-	// 2. Resolve provider -  no switch, no string matching here
+	// Resolve the active LLM provider
 	provider, err := llm.Get(config.GetCurrentModel())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -52,13 +41,24 @@ func ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Call LLM
-	answer, err := provider.Complete(finalPrompt)
+	// Let the planner decide whether RAG is needed and build the final prompt
+	plan, err := planner.Build(req.Question, provider)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "Planner error: %v", err)
+		return
+	}
+
+	// Call the LLM with the planned prompt
+	answer, err := provider.Complete(plan.Prompt)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "LLM error: %v", err)
 		return
 	}
 
-	json.NewEncoder(w).Encode(ChatResponse{Answer: answer})
+	json.NewEncoder(w).Encode(ChatResponse{
+		Answer:  answer,
+		UsedRAG: plan.NeedsRAG,
+	})
 }

@@ -9,7 +9,8 @@ import (
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
 )
 
-// embedder is the package-level embedder instance. We use Gemini for embedding, but this can be swapped out if needed.
+// embedder is the package-level embedder instance.
+// Swap this out if you add a second embedding provider.
 var embedder llm.Embedder = &llm.GeminiEmbedder{}
 
 type Doc struct {
@@ -34,22 +35,27 @@ func EmbedAllReadmes() ([]Doc, error) {
 			continue
 		}
 
-		docs = append(docs, Doc{
+		doc := Doc{
 			Path:      d.Path,
 			Content:   d.Content,
 			Embedding: vec,
-		})
+		}
+
+		docs = append(docs, doc)
+
+		// Keep the in-memory store current as we go
+		store.Set(doc)
 	}
 
+	// Persist to disk so restarts don't need to re-embed
 	dataBytes, err := json.MarshalIndent(docs, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-
 	if err := os.WriteFile("./data/embeddings.json", dataBytes, 0644); err != nil {
 		return nil, err
 	}
 
-	fmt.Printf("Generated embeddings for %d documents\n", len(docs))
+	fmt.Printf("Embedded and stored %d documents\n", len(docs))
 	return docs, nil
 }

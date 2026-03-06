@@ -8,29 +8,33 @@ import (
 	"time"
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
-
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/routes"
 	"github.com/joho/godotenv"
 )
 
 func main() {
-
 	godotenv.Load()
 
-	// Set initial model
 	config.SetCurrentModel(os.Getenv("GROQ_MODEL"))
 	fmt.Println("Server starting...")
 	fmt.Println("Initial model:", config.GetCurrentModel())
 
-	// Initial embeddings
-	docs, err := rag.EmbedAllReadmes()
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Initial embeddings generated for %d docs\n", len(docs))
+	// Try to load existing embeddings from disk first.
+	// This avoids re-embedding everything on every restart.
+	if err := rag.LoadFromDisk(); err != nil {
+		fmt.Println("No existing embeddings found, generating fresh ones...")
 
-	// Start auto update
+		docs, err := rag.EmbedAllReadmes()
+		if err != nil {
+			log.Fatal("Failed to generate initial embeddings:", err)
+		}
+		fmt.Printf("Generated embeddings for %d docs\n", len(docs))
+	} else {
+		fmt.Println("Loaded embeddings from disk into memory store")
+	}
+
+	// Periodically switch models and refresh embeddings
 	go autoUpdateRoutine()
 
 	http.HandleFunc("/chat", routes.ChatHandler)
@@ -54,6 +58,7 @@ func autoUpdateRoutine() {
 	}
 }
 
+// switchModel alternates between Groq and Gemini on each tick.
 func switchModel() {
 	if config.GetCurrentModel() == os.Getenv("GROQ_MODEL") {
 		config.SetCurrentModel(os.Getenv("GEMINI_MODEL"))

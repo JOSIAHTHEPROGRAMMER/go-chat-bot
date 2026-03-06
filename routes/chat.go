@@ -7,12 +7,13 @@ import (
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
+	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/logger"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/planner"
 )
 
 type ChatRequest struct {
 	Question string        `json:"question"`
-	History  []llm.Message `json:"history"` // prior turns - empty on first message
+	History  []llm.Message `json:"history"` // prior turns, empty on first message
 }
 
 type ChatResponse struct {
@@ -42,8 +43,13 @@ func ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Write provider name into the request log for observability
+	if rl := logger.FromContext(r.Context()); rl != nil {
+		rl.Provider = provider.Name()
+	}
+
 	// Planner classifies the question and builds the full message slice
-	plan, err := planner.Build(req.Question, req.History, provider)
+	plan, err := planner.Build(r.Context(), req.Question, req.History, provider)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Planner error: %v", err)

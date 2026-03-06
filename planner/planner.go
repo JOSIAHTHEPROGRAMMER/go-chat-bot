@@ -1,12 +1,14 @@
 package planner
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
+	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/logger"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/tools"
 )
@@ -45,8 +47,8 @@ Options:
    {"type": "rag"}
 
 3. Tool call:
-   - Specific named project → {"type": "tool", "tool": "get_project", "input": "<project name>"}
-   - Projects using a technology → {"type": "tool", "tool": "filter_by_tech", "input": "<technology name>"}
+   - Specific named project -> {"type": "tool", "tool": "get_project", "input": "<project name>"}
+   - Projects using a technology -> {"type": "tool", "tool": "filter_by_tech", "input": "<technology name>"}
 
 Rules:
 - Use "direct" for greetings or anything not about the portfolio
@@ -56,9 +58,8 @@ Rules:
 Question: %s`
 
 // Build classifies the question and returns a Plan with a ready-to-send message slice.
-// history contains prior turns in the conversation - may be empty for the first message.
-func Build(question string, history []llm.Message, provider llm.Provider) (Plan, error) {
-	// Step 1: classify the question (no history needed for routing)
+// history contains prior turns in the conversation, may be empty for the first message.
+func Build(ctx context.Context, question string, history []llm.Message, provider llm.Provider) (Plan, error) {
 	raw, err := provider.Complete(fmt.Sprintf(classifyPrompt, question))
 	if err != nil {
 		return Plan{}, fmt.Errorf("classification failed: %w", err)
@@ -79,6 +80,7 @@ func Build(question string, history []llm.Message, provider llm.Provider) (Plan,
 	switch PlanType(classification.Type) {
 
 	case PlanDirect:
+		writeLog(ctx, PlanDirect, 0)
 		return Plan{
 			Type:     PlanDirect,
 			Messages: buildMessages("", question, history),
@@ -88,32 +90,34 @@ func Build(question string, history []llm.Message, provider llm.Provider) (Plan,
 		tool, err := tools.Get(classification.Tool)
 		if err != nil {
 			fmt.Printf("planner: %v, falling back to rag\n", err)
-			return buildRAGPlan(question, history)
+			return buildRAGPlan(ctx, question, history)
 		}
 
 		result, err := tool.Run(classification.Input)
 		if err != nil {
 			fmt.Printf("planner: tool %q returned no result (%v), falling back to rag\n", classification.Tool, err)
-			return buildRAGPlan(question, history)
+			return buildRAGPlan(ctx, question, history)
 		}
 
+		writeLog(ctx, PlanTool, 1)
 		return Plan{
 			Type:     PlanTool,
 			Messages: buildMessages(result, question, history),
 		}, nil
 
 	default:
-		return buildRAGPlan(question, history)
+		return buildRAGPlan(ctx, question, history)
 	}
 }
 
 // buildRAGPlan runs similarity search and builds a RAG-based plan.
-func buildRAGPlan(question string, history []llm.Message) (Plan, error) {
+func buildRAGPlan(ctx context.Context, question string, history []llm.Message) (Plan, error) {
 	docs, err := rag.SearchTopK(question, 3)
 	if err != nil {
 		return Plan{}, fmt.Errorf("RAG search failed: %w", err)
 	}
 
+	writeLog(ctx, PlanRAG, len(docs))
 	return Plan{
 		Type:     PlanRAG,
 		Messages: buildMessages(rag.GetContextString(docs), question, history),
@@ -121,20 +125,17 @@ func buildRAGPlan(question string, history []llm.Message) (Plan, error) {
 }
 
 // buildMessages assembles the full message slice for provider.Chat().
-// Structure: system prompt → history → current user message (with optional context prepended).
+// Structure: system prompt, history, current user message with optional context.
 func buildMessages(context, question string, history []llm.Message) []llm.Message {
-	// Start with the system prompt as the first user message.
-	// Note: neither Groq nor Gemini support a dedicated "system" role in all configurations,
+	// Neither Groq nor Gemini support a dedicated system role in all configurations,
 	// so we prepend it as a user turn followed by an assistant acknowledgement.
 	messages := []llm.Message{
 		{Role: "user", Content: config.SystemPrompt},
 		{Role: "assistant", Content: "Understood. I will follow these guidelines."},
 	}
 
-	// Append prior conversation turns
 	messages = append(messages, history...)
 
-	// Build the current user message - prepend context if we have it
 	userContent := question
 	if context != "" {
 		userContent = fmt.Sprintf("Context:\n%s\n\nQuestion:\n%s", context, question)
@@ -142,4 +143,13 @@ func buildMessages(context, question string, history []llm.Message) []llm.Messag
 
 	messages = append(messages, llm.Message{Role: "user", Content: userContent})
 	return messages
+}
+
+// writeLog records the plan decision into the request-scoped logger.
+// Safe to call with a context that has no logger attached.
+func writeLog(ctx context.Context, planType PlanType, docCount int) {
+	if rl := logger.FromContext(ctx); rl != nil {
+		rl.PlanType = string(planType)
+		rl.DocCount = docCount
+	}
 }

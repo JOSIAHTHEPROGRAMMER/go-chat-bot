@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
+	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/middleware"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/routes"
 	"github.com/joho/godotenv"
@@ -37,7 +38,8 @@ func main() {
 	// Periodically switch models and refresh embeddings
 	go autoUpdateRoutine()
 
-	http.HandleFunc("/chat", routes.ChatHandler)
+	// Wrap every route with the full middleware chain
+	http.HandleFunc("/chat", middleware.Chain(routes.ChatHandler))
 
 	fmt.Println("Server running on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

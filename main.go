@@ -48,7 +48,7 @@ func main() {
 	go autoUpdateRoutine()
 
 	// /health is unauthenticated and not rate limited so Render can reach it freely
-	http.HandleFunc("/health", routes.HealthHandler)
+	http.HandleFunc("/health", middleware.CORS(routes.HealthHandler))
 	http.HandleFunc("/chat", middleware.Chain(routes.ChatHandler))
 	http.HandleFunc("/stream", middleware.Chain(routes.StreamHandler))
 

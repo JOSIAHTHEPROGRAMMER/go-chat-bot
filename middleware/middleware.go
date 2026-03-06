@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/logger"
@@ -22,9 +24,9 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// Chain wraps a handler with all middleware in order: Recovery, CORS, Logging.
+// Chain wraps a handler with all middleware in order: Recovery, CORS, Auth, RateLimit, Logging.
 func Chain(next http.HandlerFunc) http.HandlerFunc {
-	return Recovery(CORS(Logging(next)))
+	return Recovery(CORS(Auth(RateLimit(Logging(next)))))
 }
 
 // Logging attaches a RequestLog to the context, runs the handler,
@@ -33,14 +35,12 @@ func Logging(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// Attach a RequestLog so downstream layers can write into it
 		ctx := logger.NewContext(r.Context())
 		r = r.WithContext(ctx)
 
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next(rw, r)
 
-		// Build the log line from whatever the downstream layers filled in
 		rl := logger.FromContext(ctx)
 		extra := ""
 		if rl != nil {
@@ -62,7 +62,7 @@ func CORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 
 		// Preflight request, browsers send this before the real request
 		if r.Method == http.MethodOptions {
@@ -70,6 +70,93 @@ func CORS(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		next(w, r)
+	}
+}
+
+// Auth checks for a valid API key in the X-API-Key header.
+// Set API_KEY in your .env. If unset, auth is skipped (safe for local dev).
+func Auth(next http.HandlerFunc) http.HandlerFunc {
+	apiKey := os.Getenv("API_KEY")
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth if no key is configured
+		if apiKey == "" {
+			next(w, r)
+			return
+		}
+
+		if r.Header.Get("X-API-Key") != apiKey {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+// ipBucket tracks request timestamps for a single IP address.
+type ipBucket struct {
+	mu         sync.Mutex
+	timestamps []time.Time
+}
+
+// rateLimiter holds per-IP buckets and is safe for concurrent use.
+type rateLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]*ipBucket
+	limit   int
+	window  time.Duration
+}
+
+var limiter = &rateLimiter{
+	buckets: make(map[string]*ipBucket),
+	window:  time.Minute,
+}
+
+// RateLimit rejects requests from IPs that exceed RATE_LIMIT requests per minute.
+// Defaults to 10 requests per minute if RATE_LIMIT is not set.
+func RateLimit(next http.HandlerFunc) http.HandlerFunc {
+	limit := 10
+	if val := os.Getenv("RATE_LIMIT"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			limit = n
+		}
+	}
+	limiter.limit = limit
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+
+		limiter.mu.Lock()
+		bucket, ok := limiter.buckets[ip]
+		if !ok {
+			bucket = &ipBucket{}
+			limiter.buckets[ip] = bucket
+		}
+		limiter.mu.Unlock()
+
+		bucket.mu.Lock()
+		defer bucket.mu.Unlock()
+
+		now := time.Now()
+		cutoff := now.Add(-limiter.window)
+
+		// Drop timestamps outside the current window
+		valid := bucket.timestamps[:0]
+		for _, t := range bucket.timestamps {
+			if t.After(cutoff) {
+				valid = append(valid, t)
+			}
+		}
+		bucket.timestamps = valid
+
+		if len(bucket.timestamps) >= limiter.limit {
+			http.Error(w, "Too many requests", http.StatusTooManyRequests)
+			return
+		}
+
+		bucket.timestamps = append(bucket.timestamps, now)
 		next(w, r)
 	}
 }

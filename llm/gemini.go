@@ -12,8 +12,14 @@ type GeminiProvider struct{}
 
 func (g *GeminiProvider) Name() string { return "gemini" }
 
-// Complete sends the given prompt to Gemini and returns the generated response text.
+// Complete sends a single-turn prompt. Used for classification.
 func (g *GeminiProvider) Complete(prompt string) (string, error) {
+	return g.Chat([]Message{{Role: "user", Content: prompt}})
+}
+
+// Chat sends a full message history to Gemini and returns the assistant's reply.
+// Gemini uses "model" instead of "assistant" for the assistant role.
+func (g *GeminiProvider) Chat(messages []Message) (string, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	model := os.Getenv("GEMINI_MODEL")
 
@@ -21,15 +27,20 @@ func (g *GeminiProvider) Complete(prompt string) (string, error) {
 		return "", fmt.Errorf("missing GEMINI_API_KEY or GEMINI_MODEL in env")
 	}
 
-	reqBody := geminiRequest{
-		Contents: []geminiContent{
-			{
-				Role:  "user",
-				Parts: []geminiPart{{Text: prompt}},
-			},
-		},
+	// Gemini uses "model" for assistant turns - map accordingly
+	contents := make([]geminiContent, len(messages))
+	for i, m := range messages {
+		role := m.Role
+		if role == "assistant" {
+			role = "model"
+		}
+		contents[i] = geminiContent{
+			Role:  role,
+			Parts: []geminiPart{{Text: m.Content}},
+		}
 	}
 
+	reqBody := geminiRequest{Contents: contents}
 	bodyBytes, _ := json.Marshal(reqBody)
 
 	url := fmt.Sprintf(

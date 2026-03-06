@@ -12,8 +12,13 @@ type GroqProvider struct{}
 
 func (g *GroqProvider) Name() string { return "groq" }
 
-// Complete sends the given prompt to Groq and returns the generated response text.
+// Complete sends a single-turn prompt. Used for classification.
 func (g *GroqProvider) Complete(prompt string) (string, error) {
+	return g.Chat([]Message{{Role: "user", Content: prompt}})
+}
+
+// Chat sends a full message history to Groq and returns the assistant's reply.
+func (g *GroqProvider) Chat(messages []Message) (string, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
 	model := os.Getenv("GROQ_MODEL")
 
@@ -21,13 +26,13 @@ func (g *GroqProvider) Complete(prompt string) (string, error) {
 		return "", fmt.Errorf("missing GROQ_API_KEY or GROQ_MODEL in env")
 	}
 
-	reqBody := groqRequest{
-		Model: model,
-		Messages: []groqMessage{
-			{Role: "user", Content: prompt},
-		},
+	// Groq uses the OpenAI message format natively
+	msgs := make([]groqMessage, len(messages))
+	for i, m := range messages {
+		msgs[i] = groqMessage{Role: m.Role, Content: m.Content}
 	}
 
+	reqBody := groqRequest{Model: model, Messages: msgs}
 	bodyBytes, _ := json.Marshal(reqBody)
 
 	req, err := http.NewRequest("POST", "https://api.groq.com/openai/v1/chat/completions", bytes.NewBuffer(bodyBytes))

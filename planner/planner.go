@@ -5,77 +5,141 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/rag"
+	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/tools"
 )
 
-// Plan is the result of the planner's decision for a given question.
+// PlanType tells the route handler how the question was handled.
+type PlanType string
+
+const (
+	PlanDirect PlanType = "direct"
+	PlanRAG    PlanType = "rag"
+	PlanTool   PlanType = "tool"
+)
+
+// Plan is the planner's decision for a given question.
 type Plan struct {
-	NeedsRAG bool   // whether to retrieve context from the vector store
-	Prompt   string // the final prompt ready to send to the LLM
+	Type     PlanType
+	Messages []llm.Message // full message slice ready to pass to provider.Chat()
 }
 
 // classifyResponse is what we expect the LLM to return during classification.
 type classifyResponse struct {
-	NeedsRAG bool `json:"needs_rag"`
+	Type  string `json:"type"`
+	Tool  string `json:"tool"`
+	Input string `json:"input"`
 }
 
-// classifyPrompt asks the LLM to decide if RAG is needed.
-// Keeping this as a const makes it easy to tune later.
-const classifyPrompt = `You are a routing assistant. Given a user question, decide if answering it requires retrieving context from a portfolio knowledge base (GitHub READMEs, project docs).
+const classifyPrompt = `You are a routing assistant for a developer portfolio backend.
 
-Respond ONLY with valid JSON in this exact format:
-{"needs_rag": true}
-or
-{"needs_rag": false}
+Given a user question, decide how to handle it. Respond ONLY with valid JSON.
+
+Options:
+1. Direct answer (no context needed):
+   {"type": "direct"}
+
+2. Semantic search (general portfolio question):
+   {"type": "rag"}
+
+3. Tool call:
+   - Specific named project → {"type": "tool", "tool": "get_project", "input": "<project name>"}
+   - Projects using a technology → {"type": "tool", "tool": "filter_by_tech", "input": "<technology name>"}
 
 Rules:
-- needs_rag = true  → question is about specific projects, skills, experience, or work history
-- needs_rag = false → question is general, conversational, or answerable without project context
+- Use "direct" for greetings or anything not about the portfolio
+- Use "rag" for general portfolio questions without a specific project or tech name
+- Use "tool" only when a specific project name or technology is clearly mentioned
 
 Question: %s`
 
-// Build classifies the question and returns a Plan with the final prompt.
-func Build(question string, provider llm.Provider) (Plan, error) {
-	// Step 1: ask the LLM whether RAG context is needed
-	classifyOut, err := provider.Complete(fmt.Sprintf(classifyPrompt, question))
+// Build classifies the question and returns a Plan with a ready-to-send message slice.
+// history contains prior turns in the conversation - may be empty for the first message.
+func Build(question string, history []llm.Message, provider llm.Provider) (Plan, error) {
+	// Step 1: classify the question (no history needed for routing)
+	raw, err := provider.Complete(fmt.Sprintf(classifyPrompt, question))
 	if err != nil {
 		return Plan{}, fmt.Errorf("classification failed: %w", err)
 	}
 
-	// Strip any markdown fences the LLM might wrap around the JSON
-	cleaned := strings.TrimSpace(classifyOut)
+	cleaned := strings.TrimSpace(raw)
 	cleaned = strings.TrimPrefix(cleaned, "```json")
 	cleaned = strings.TrimPrefix(cleaned, "```")
 	cleaned = strings.TrimSuffix(cleaned, "```")
+	cleaned = strings.TrimSpace(cleaned)
 
 	var classification classifyResponse
 	if err := json.Unmarshal([]byte(cleaned), &classification); err != nil {
-		// If parsing fails, default to using RAG — safer than missing context
-		fmt.Printf("planner: classification parse failed (%v), defaulting to RAG\n", err)
-		classification.NeedsRAG = true
+		fmt.Printf("planner: parse failed (%v), defaulting to rag\n", err)
+		classification.Type = "rag"
 	}
 
-	// Step 2: build the final prompt based on the decision
-	if !classification.NeedsRAG {
+	switch PlanType(classification.Type) {
+
+	case PlanDirect:
 		return Plan{
-			NeedsRAG: false,
-			Prompt:   fmt.Sprintf("You are a portfolio assistant.\n\nQuestion:\n%s", question),
+			Type:     PlanDirect,
+			Messages: buildMessages("", question, history),
 		}, nil
-	}
 
-	// Step 3: retrieve RAG context only if needed
+	case PlanTool:
+		tool, err := tools.Get(classification.Tool)
+		if err != nil {
+			fmt.Printf("planner: %v, falling back to rag\n", err)
+			return buildRAGPlan(question, history)
+		}
+
+		result, err := tool.Run(classification.Input)
+		if err != nil {
+			fmt.Printf("planner: tool %q returned no result (%v), falling back to rag\n", classification.Tool, err)
+			return buildRAGPlan(question, history)
+		}
+
+		return Plan{
+			Type:     PlanTool,
+			Messages: buildMessages(result, question, history),
+		}, nil
+
+	default:
+		return buildRAGPlan(question, history)
+	}
+}
+
+// buildRAGPlan runs similarity search and builds a RAG-based plan.
+func buildRAGPlan(question string, history []llm.Message) (Plan, error) {
 	docs, err := rag.SearchTopK(question, 3)
 	if err != nil {
 		return Plan{}, fmt.Errorf("RAG search failed: %w", err)
 	}
 
-	context := rag.GetContextString(docs)
 	return Plan{
-		NeedsRAG: true,
-		Prompt: fmt.Sprintf(
-			"You are a portfolio assistant.\n\nContext:\n%s\n\nQuestion:\n%s",
-			context, question,
-		),
+		Type:     PlanRAG,
+		Messages: buildMessages(rag.GetContextString(docs), question, history),
 	}, nil
+}
+
+// buildMessages assembles the full message slice for provider.Chat().
+// Structure: system prompt → history → current user message (with optional context prepended).
+func buildMessages(context, question string, history []llm.Message) []llm.Message {
+	// Start with the system prompt as the first user message.
+	// Note: neither Groq nor Gemini support a dedicated "system" role in all configurations,
+	// so we prepend it as a user turn followed by an assistant acknowledgement.
+	messages := []llm.Message{
+		{Role: "user", Content: config.SystemPrompt},
+		{Role: "assistant", Content: "Understood. I will follow these guidelines."},
+	}
+
+	// Append prior conversation turns
+	messages = append(messages, history...)
+
+	// Build the current user message - prepend context if we have it
+	userContent := question
+	if context != "" {
+		userContent = fmt.Sprintf("Context:\n%s\n\nQuestion:\n%s", context, question)
+	}
+
+	messages = append(messages, llm.Message{Role: "user", Content: userContent})
+	return messages
 }

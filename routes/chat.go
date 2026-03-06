@@ -11,12 +11,13 @@ import (
 )
 
 type ChatRequest struct {
-	Question string `json:"question"`
+	Question string        `json:"question"`
+	History  []llm.Message `json:"history"` // prior turns - empty on first message
 }
 
 type ChatResponse struct {
-	Answer  string `json:"answer"`
-	UsedRAG bool   `json:"used_rag"` // useful for debugging and frontend transparency
+	Answer   string `json:"answer"`
+	PlanType string `json:"plan_type"`
 }
 
 func ChatHandler(w http.ResponseWriter, r *http.Request) {
@@ -41,16 +42,16 @@ func ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Let the planner decide whether RAG is needed and build the final prompt
-	plan, err := planner.Build(req.Question, provider)
+	// Planner classifies the question and builds the full message slice
+	plan, err := planner.Build(req.Question, req.History, provider)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Planner error: %v", err)
 		return
 	}
 
-	// Call the LLM with the planned prompt
-	answer, err := provider.Complete(plan.Prompt)
+	// Send the full conversation to the LLM
+	answer, err := provider.Chat(plan.Messages)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "LLM error: %v", err)
@@ -58,7 +59,7 @@ func ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(ChatResponse{
-		Answer:  answer,
-		UsedRAG: plan.NeedsRAG,
+		Answer:   answer,
+		PlanType: string(plan.Type),
 	})
 }

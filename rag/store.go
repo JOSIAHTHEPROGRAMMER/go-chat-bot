@@ -39,6 +39,12 @@ func (s *vectorStore) Size() int {
 	return len(s.docs)
 }
 
+// StoreAll exposes the store's contents to other packages (e.g. tools).
+// Returns a snapshot - safe to iterate without holding the lock.
+func StoreAll() []Doc {
+	return store.All()
+}
+
 // LoadFromDisk populates the store from the persisted embeddings JSON.
 // Call this at startup so a restart doesn't require re-embedding everything.
 func LoadFromDisk() error {

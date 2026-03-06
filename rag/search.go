@@ -41,7 +41,7 @@ func cosineSimilarity(a, b []float32) float32 {
 }
 
 // SearchTopK returns the k docs most semantically similar to the query.
-// Fails hard if the store is empty — means LoadFromDisk wasn't called at startup.
+// Fails hard if the store is empty - means LoadFromDisk wasn't called at startup.
 func SearchTopK(query string, k int) ([]Doc, error) {
 	if store.Size() == 0 {
 		return nil, fmt.Errorf("vector store is empty: call rag.LoadFromDisk() at startup")

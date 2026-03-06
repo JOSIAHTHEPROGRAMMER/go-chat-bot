@@ -21,7 +21,7 @@ import (
 func main() {
 	godotenv.Load()
 
-	config.SetCurrentModel(os.Getenv("GROQ_MODEL"))
+	config.SetCurrentModel("groq")
 	fmt.Println("Server starting...")
 	fmt.Println("Initial model:", config.GetCurrentModel())
 
@@ -104,9 +104,9 @@ func autoUpdateRoutine() {
 
 // switchModel alternates between Groq and Gemini on each tick.
 func switchModel() {
-	if config.GetCurrentModel() == os.Getenv("GROQ_MODEL") {
-		config.SetCurrentModel(os.Getenv("GEMINI_MODEL"))
+	if config.GetCurrentModel() == "groq" {
+		config.SetCurrentModel("gemini")
 	} else {
-		config.SetCurrentModel(os.Getenv("GROQ_MODEL"))
+		config.SetCurrentModel("groq")
 	}
 }

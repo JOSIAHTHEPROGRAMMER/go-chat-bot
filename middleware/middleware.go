@@ -24,6 +24,13 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Flush forwards to the underlying ResponseWriter so SSE streaming works.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // Chain wraps a handler with all middleware in order: Recovery, CORS, Auth, RateLimit, Logging.
 func Chain(next http.HandlerFunc) http.HandlerFunc {
 	return Recovery(CORS(Auth(RateLimit(Logging(next)))))
@@ -75,12 +82,11 @@ func CORS(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // Auth checks for a valid API key in the X-API-Key header.
-// Set API_KEY in your .env. If unset, auth is skipped (safe for local dev).
+// Set API_KEY in your .env. If unset, auth is skipped for local development.
 func Auth(next http.HandlerFunc) http.HandlerFunc {
 	apiKey := os.Getenv("API_KEY")
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Skip auth if no key is configured
 		if apiKey == "" {
 			next(w, r)
 			return

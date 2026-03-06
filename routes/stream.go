@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/config"
 	"github.com/JOSIAHTHEPROGRAMMER/portfolio-backend/llm"
@@ -90,25 +91,26 @@ func StreamHandler(w http.ResponseWriter, r *http.Request) {
 	errCh := make(chan error, 1)
 
 	// Collect the full answer while streaming so we can persist it
-	var fullAnswer string
+	var fullAnswer strings.Builder
 
 	go func() {
 		errCh <- provider.Stream(plan.Messages, tokenCh)
 	}()
 
 	for token := range tokenCh {
-		fullAnswer += token
+		fullAnswer.WriteString(token)
 		fmt.Fprintf(w, "data: %s\n\n", token)
 		flusher.Flush()
 	}
 
 	if err := <-errCh; err != nil {
+		fmt.Printf("stream error: %v\n", err)
 		fmt.Fprintf(w, "event: error\ndata: %v\n\n", err)
 		flusher.Flush()
 	}
 
 	// Persist the completed turn to MongoDB
-	if err := session.Append(ctx, sessionID, req.Question, fullAnswer); err != nil {
+	if err := session.Append(ctx, sessionID, req.Question, fullAnswer.String()); err != nil {
 		fmt.Printf("session append error: %v\n", err)
 	}
 

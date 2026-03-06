@@ -5,18 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"net/http"
 	"os"
 )
 
-// qdrantClient holds connection config for the Qdrant REST API.
 type qdrantClient struct {
 	url        string
 	collection string
 	apiKey     string
 }
 
-// newQdrantClient reads config from env and returns a client.
 func newQdrantClient() *qdrantClient {
 	return &qdrantClient{
 		url:        os.Getenv("QDRANT_URL"),
@@ -25,7 +24,6 @@ func newQdrantClient() *qdrantClient {
 	}
 }
 
-// do executes an HTTP request against the Qdrant API.
 func (c *qdrantClient) do(method, path string, body any) (*http.Response, error) {
 	var buf bytes.Buffer
 	if body != nil {
@@ -47,12 +45,10 @@ func (c *qdrantClient) do(method, path string, body any) (*http.Response, error)
 	return http.DefaultClient.Do(req)
 }
 
-// EnsureCollection creates the collection if it does not already exist.
-// Vector size 3072 matches gemini-embedding-001 output dimensions.
 func (c *qdrantClient) EnsureCollection() error {
 	path := fmt.Sprintf("/collections/%s", c.collection)
+	//	fmt.Printf("Qdrant URL=%s Collection=%s\n", c.url, c.collection)
 
-	// Check if collection exists
 	res, err := c.do("GET", path, nil)
 	if err != nil {
 		return err
@@ -60,10 +56,10 @@ func (c *qdrantClient) EnsureCollection() error {
 	res.Body.Close()
 
 	if res.StatusCode == http.StatusOK {
-		return nil // already exists
+		fmt.Println("Qdrant collection already exists")
+		return nil
 	}
 
-	// Create it with cosine distance to match our previous similarity metric
 	payload := map[string]any{
 		"vectors": map[string]any{
 			"size":     3072,
@@ -81,37 +77,46 @@ func (c *qdrantClient) EnsureCollection() error {
 		return fmt.Errorf("failed to create Qdrant collection: status %d", res.StatusCode)
 	}
 
+	fmt.Println("Qdrant collection created")
 	return nil
 }
 
-// Upsert stores or updates a single doc as a Qdrant point.
-// Uses a hash of the path as the point ID for stable, idempotent writes.
 func (c *qdrantClient) Upsert(doc Doc) error {
 	payload := map[string]any{
 		"points": []map[string]any{
 			{
-				"id":      pathToID(doc.Path),
-				"vector":  doc.Embedding,
-				"payload": map[string]string{"path": doc.Path, "content": doc.Content},
+				"id":     pathToID(doc.Path),
+				"vector": doc.Embedding,
+				"payload": map[string]any{
+					"path":      doc.Path,
+					"content":   doc.Content,
+					"languages": doc.Languages,
+				},
 			},
 		},
 	}
 
-	path := fmt.Sprintf("/collections/%s/points", c.collection)
+	path := fmt.Sprintf("/collections/%s/points?wait=true", c.collection)
 	res, err := c.do("PUT", path, payload)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 
+	raw, _ := io.ReadAll(res.Body)
+
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("qdrant upsert failed: status %d", res.StatusCode)
+		return fmt.Errorf("qdrant upsert failed: status %d body: %s", res.StatusCode, string(raw))
+	}
+
+	// Log first upsert response to confirm structure
+	if doc.Path == "ai-study-extension-server" {
+		fmt.Printf("Upsert response for %s: %s\n", doc.Path, string(raw))
 	}
 
 	return nil
 }
 
-// Search returns the top-k most similar docs to the query vector.
 func (c *qdrantClient) Search(vector []float32, k int) ([]Doc, error) {
 	payload := map[string]any{
 		"vector":       vector,
@@ -129,8 +134,9 @@ func (c *qdrantClient) Search(vector []float32, k int) ([]Doc, error) {
 	var result struct {
 		Result []struct {
 			Payload struct {
-				Path    string `json:"path"`
-				Content string `json:"content"`
+				Path      string         `json:"path"`
+				Content   string         `json:"content"`
+				Languages map[string]int `json:"languages"`
 			} `json:"payload"`
 		} `json:"result"`
 	}
@@ -142,16 +148,15 @@ func (c *qdrantClient) Search(vector []float32, k int) ([]Doc, error) {
 	docs := make([]Doc, 0, len(result.Result))
 	for _, r := range result.Result {
 		docs = append(docs, Doc{
-			Path:    r.Payload.Path,
-			Content: r.Payload.Content,
+			Path:      r.Payload.Path,
+			Content:   r.Payload.Content,
+			Languages: r.Payload.Languages,
 		})
 	}
 
 	return docs, nil
 }
 
-// Scroll retrieves all docs in the collection without a query vector.
-// Used by StoreAll() to support the tools package.
 func (c *qdrantClient) Scroll() ([]Doc, error) {
 	payload := map[string]any{
 		"limit":        1000,
@@ -166,33 +171,40 @@ func (c *qdrantClient) Scroll() ([]Doc, error) {
 	}
 	defer res.Body.Close()
 
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("scroll read error: %w", err)
+	}
+	fmt.Printf("Scroll raw response (first 500 chars): %.500s\n", string(raw))
+
 	var result struct {
 		Result struct {
 			Points []struct {
 				Payload struct {
-					Path    string `json:"path"`
-					Content string `json:"content"`
+					Path      string         `json:"path"`
+					Content   string         `json:"content"`
+					Languages map[string]int `json:"languages"`
 				} `json:"payload"`
 			} `json:"points"`
 		} `json:"result"`
 	}
 
-	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		return nil, err
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("scroll decode error: %w", err)
 	}
 
 	docs := make([]Doc, 0, len(result.Result.Points))
 	for _, p := range result.Result.Points {
 		docs = append(docs, Doc{
-			Path:    p.Payload.Path,
-			Content: p.Payload.Content,
+			Path:      p.Payload.Path,
+			Content:   p.Payload.Content,
+			Languages: p.Payload.Languages,
 		})
 	}
 
 	return docs, nil
 }
 
-// pathToID hashes a repo path to a stable uint64 for use as a Qdrant point ID.
 func pathToID(path string) uint64 {
 	h := fnv.New64a()
 	h.Write([]byte(path))

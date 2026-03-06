@@ -35,25 +35,33 @@ type classifyResponse struct {
 	Input string `json:"input"`
 }
 
-const classifyPrompt = `You are a routing assistant for a developer portfolio backend.
+const classifyPrompt = `You are a routing assistant. Your only job is to output one JSON object and nothing else.
 
-Given a user question, decide how to handle it. Respond ONLY with valid JSON.
+STEP 1 - Read the question carefully.
+STEP 2 - Pick exactly one of the four outputs below. No other output is valid.
 
-Options:
-1. Direct answer (no context needed):
-   {"type": "direct"}
+OUTPUT A - greetings, small talk, or questions unrelated to the developer portfolio:
+{"type":"direct"}
 
-2. Semantic search (general portfolio question):
-   {"type": "rag"}
+OUTPUT B - general questions about the developer's skills, background, or experience:
+{"type":"rag"}
 
-3. Tool call:
-   - Specific named project -> {"type": "tool", "tool": "get_project", "input": "<project name>"}
-   - Projects using a technology -> {"type": "tool", "tool": "filter_by_tech", "input": "<technology name>"}
+OUTPUT C - question asks which projects use a specific programming language or technology.
+A technology is something like: JavaScript, Go, Python, React, TypeScript, CSS, SQL.
+A technology is NOT a project name.
+Use one technology only - if multiple are mentioned pick the most specific one.
+{"type":"tool","tool":"filter_by_tech","input":"<single technology name, lowercase>"}
 
-Rules:
-- Use "direct" for greetings or anything not about the portfolio
-- Use "rag" for general portfolio questions without a specific project or tech name
-- Use "tool" only when a specific project name or technology is clearly mentioned
+OUTPUT D - question asks about a specific named project (e.g. tell me about Neura, what is CaribCart):
+{"type":"tool","tool":"get_project","input":"<exact project name, preserve original casing>"}
+
+STRICT RULES:
+- Output only raw JSON, no markdown, no explanation, no extra text
+- The only valid values for "tool" are exactly: "filter_by_tech" or "get_project" - nothing else
+- "filter_by_tech" is ONLY for programming languages and technologies, never for project names
+- "get_project" is ONLY for named projects, never for languages or technologies
+- Never combine multiple technologies into one input string
+- If you are unsure, use OUTPUT B
 
 Question: %s`
 
@@ -65,6 +73,7 @@ func Build(ctx context.Context, question string, history []llm.Message, provider
 		return Plan{}, fmt.Errorf("classification failed: %w", err)
 	}
 
+	// Strip any markdown fences the LLM might add despite being told not to
 	cleaned := strings.TrimSpace(raw)
 	cleaned = strings.TrimPrefix(cleaned, "```json")
 	cleaned = strings.TrimPrefix(cleaned, "```")
@@ -75,6 +84,14 @@ func Build(ctx context.Context, question string, history []llm.Message, provider
 	if err := json.Unmarshal([]byte(cleaned), &classification); err != nil {
 		fmt.Printf("planner: parse failed (%v), defaulting to rag\n", err)
 		classification.Type = "rag"
+	}
+
+	// Validate tool name before dispatching - prevents hallucinated tool names from erroring
+	if PlanType(classification.Type) == PlanTool {
+		if classification.Tool != "filter_by_tech" && classification.Tool != "get_project" {
+			fmt.Printf("planner: invalid tool %q, defaulting to rag\n", classification.Tool)
+			return buildRAGPlan(ctx, question, history)
+		}
 	}
 
 	switch PlanType(classification.Type) {

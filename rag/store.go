@@ -1,7 +1,10 @@
 package rag
 
-// client is the package-level Qdrant client used across the rag package.
-var client = newQdrantClient()
+import "fmt"
+
+// client is the package-level Qdrant client.
+// Initialized lazily in InitStore() so godotenv.Load() runs first.
+var client *qdrantClient
 
 // Set upserts a single doc into Qdrant.
 func Set(doc Doc) error {
@@ -13,15 +16,18 @@ func Set(doc Doc) error {
 func StoreAll() []Doc {
 	docs, err := client.Scroll()
 	if err != nil {
+		fmt.Printf("StoreAll error: %v\n", err)
 		return nil
 	}
+	fmt.Printf("StoreAll returned %d docs\n", len(docs))
 	return docs
 }
 
-// InitStore creates the Qdrant collection if it does not already exist.
-// Call this once at startup before any reads or writes.
-
+// InitStore initializes the Qdrant client and creates the collection if it does not exist.
+// Must be called after godotenv.Load() so env vars are available.
 func InitStore() error {
 	client = newQdrantClient()
+	//fmt.Printf("Qdrant URL: %s | Collection: %s\n", client.url, client.collection)
+
 	return client.EnsureCollection()
 }

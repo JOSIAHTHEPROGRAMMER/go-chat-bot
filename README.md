@@ -1,4 +1,4 @@
-# AI Portfolio Chatbot — Go Backend
+# AI Portfolio Chatbot - Go Backend
 
 ![Go](https://img.shields.io/badge/Go-1.25.4-00ADD8?style=flat&logo=go&logoColor=white)
 ![Render](https://img.shields.io/badge/Deployed%20on-Render-46E3B7?style=flat&logo=render&logoColor=white)
@@ -8,7 +8,7 @@
 ![Gemini](https://img.shields.io/badge/LLM-Gemini-4285F4?style=flat&logo=google&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat)
 
-A production-grade AI backend written in Go that powers a portfolio chatbot. The system fetches GitHub README data and language statistics, embeds them into a vector database, and uses a multi-step planning layer to route user questions to the most appropriate handler — direct answer, semantic search, or a purpose-built tool — before calling an LLM to generate a grounded response.
+A production-grade AI backend written in Go that powers a portfolio chatbot. The system fetches GitHub README data and language statistics, embeds them into a vector database, and uses a multi-step planning layer to route user questions to the most appropriate handler - direct answer, semantic search, or a purpose-built tool - before calling an LLM to generate a grounded response.
 
 ---
 
@@ -49,7 +49,7 @@ Request
 ├── middleware/
 │   └── middleware.go     # CORS, Auth, Rate limiting, Logging, Recovery
 ├── planner/
-│   └── planner.go        # Decision layer — routes questions to the right handler
+│   └── planner.go        # Decision layer - routes questions to the right handler
 ├── rag/
 │   ├── embed.go          # Embeds READMEs and upserts into Qdrant
 │   ├── qdrant.go         # Qdrant REST client
@@ -78,10 +78,10 @@ Request
 2. Each README is embedded using Gemini `text-embedding-004` (3072 dimensions) with a rate-limit-safe delay between calls, then upserted into Qdrant with language data stored in the payload.
 3. Every 6 hours the system refreshes embeddings and alternates between Groq and Gemini as the active LLM provider.
 4. When a question arrives the **Planner** classifies intent and routes accordingly:
-   - **Direct** — greetings and small talk, no context needed
-   - **RAG** — query is embedded, top-k similar documents retrieved from Qdrant and injected into the prompt
-   - **Tool: get_project** — a specific project name is detected, the doc is fetched directly from Qdrant by path
-   - **Tool: filter_by_tech** — a language or technology is detected, all docs are scanned using GitHub language stats as the primary source and README keyword matching as fallback
+   - **Direct** - greetings and small talk, no context needed
+   - **RAG** - query is embedded, top-k similar documents retrieved from Qdrant and injected into the prompt
+   - **Tool: get_project** - a specific project name is detected, the doc is fetched directly from Qdrant by path
+   - **Tool: filter_by_tech** - a language or technology is detected, all docs are scanned using GitHub language stats as the primary source and README keyword matching as fallback
 5. The prompt is assembled with the system persona, conversation history, retrieved context, and the question.
 6. The response is streamed token by token via SSE or returned in full, and the turn is persisted to MongoDB under the session ID.
 
@@ -122,10 +122,10 @@ Same as `/chat` but returns tokens as Server-Sent Events.
 
 **Events:**
 
-- `event: session` — fired first, contains the session ID
-- `data: <token>` — one event per token as they arrive
-- `event: error` — fired if the LLM stream fails
-- `event: done` — fired when the stream is complete
+- `event: session` - fired first, contains the session ID
+- `data: <token>` - one event per token as they arrive
+- `event: error` - fired if the LLM stream fails
+- `event: done` - fired when the stream is complete
 
 **Frontend example:**
 
@@ -171,7 +171,7 @@ Unauthenticated. Used by Render for uptime monitoring.
 | `ALLOWED_ORIGIN`    | Yes        | Frontend URL for CORS e.g. `https://your-app.vercel.app` |
 | `API_KEY`           | Yes        | Secret key sent by the frontend in `X-API-Key` header    |
 | `RATE_LIMIT`        | No         | Max requests per minute per IP (default: `10`)           |
-| `PORT`              | No         | Server port — injected automatically by Render           |
+| `PORT`              | No         | Server port - injected automatically by Render           |
 
 ---
 

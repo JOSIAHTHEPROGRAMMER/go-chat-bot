@@ -13,33 +13,32 @@ import (
 type Doc struct {
 	Path      string
 	Content   string
-	Languages map[string]int // language name -> bytes of code, from GitHub's language API
+	Languages map[string]int
 }
 
-// ignoredRepos are repos that should never be embedded.
-// Includes third-party tools, coursework, forks, and repos without meaningful READMEs.
-var ignoredRepos = map[string]bool{
-	// third-party tools used in README
-	"github-readme-stats":   true,
-	"GitHubTree":            true,
-	"github-profile-trophy": true,
-	// coursework and labs
-	"info1601labs":                  true,
-	"INFO2602L2":                    true,
-	"INFO2602L3":                    true,
-	"info2602l4":                    true,
-	"INFO3604-Project-Backend":      true,
-	"Student-Analysis-xAPI-project": true,
-	// no README or not a real project
-	"BasicApps":       true,
-	"Expense-Tracker": true,
-	"Flask-intro":     true,
-	"Pong-game":       true,
-	"Text-to-Speech":  true,
-	"Tik-Tak-Toe":     true,
+// buildIgnoreList builds the ignored repos set from the IGNORED_REPOS env var.
+// Format: comma-separated repo names e.g. "my-repo,another-repo"
+// Forks are always skipped regardless of this list.
+func buildIgnoreList() map[string]bool {
+	ignored := make(map[string]bool)
+	if val := os.Getenv("IGNORED_REPOS"); val != "" {
+		for _, name := range strings.Split(val, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				ignored[name] = true
+			}
+		}
+	}
+	return ignored
+}
+
+// FetchREADMEs is the primary entry point used by main.go.
+func FetchREADMEs() ([]Doc, error) {
+	return FetchAllReadmes()
 }
 
 // FetchAllReadmes fetches all README files and language stats from GitHub.
+// Skips forks and any repos listed in IGNORED_REPOS.
 func FetchAllReadmes() ([]Doc, error) {
 	username := os.Getenv("GITHUB_USERNAME")
 	token := os.Getenv("GITHUB_TOKEN")
@@ -48,6 +47,7 @@ func FetchAllReadmes() ([]Doc, error) {
 		return nil, fmt.Errorf("missing GITHUB_USERNAME or GITHUB_TOKEN in .env")
 	}
 
+	ignoredRepos := buildIgnoreList()
 	client := &http.Client{}
 
 	repos, err := fetchAllRepos(client, username, token)
@@ -58,9 +58,8 @@ func FetchAllReadmes() ([]Doc, error) {
 	fmt.Printf("Found %d repos total\n", len(repos))
 
 	var docs []Doc
-
 	for _, repo := range repos {
-		if ignoredRepos[repo.Name] || repo.Fork {
+		if repo.Fork || ignoredRepos[repo.Name] {
 			fmt.Printf("skipping %s\n", repo.Name)
 			continue
 		}
@@ -105,7 +104,6 @@ func fetchAllRepos(client *http.Client, username, token string) ([]struct {
 			"https://api.github.com/users/%s/repos?per_page=100&page=%d",
 			username, page,
 		)
-
 		req, _ := http.NewRequestWithContext(context.Background(), "GET", url, nil)
 		req.Header.Set("Authorization", "token "+token)
 
@@ -118,15 +116,12 @@ func fetchAllRepos(client *http.Client, username, token string) ([]struct {
 			Name string `json:"name"`
 			Fork bool   `json:"fork"`
 		}
-
-		// Decode and close immediately - no defer inside a loop
 		json.NewDecoder(resp.Body).Decode(&repos)
 		resp.Body.Close()
 
 		if len(repos) == 0 {
 			break
 		}
-
 		all = append(all, repos...)
 		page++
 	}

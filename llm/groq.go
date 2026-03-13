@@ -14,12 +14,10 @@ type GroqProvider struct{}
 
 func (g *GroqProvider) Name() string { return "groq" }
 
-// Complete sends a single-turn prompt. Used for classification.
 func (g *GroqProvider) Complete(prompt string) (string, error) {
 	return g.Chat([]Message{{Role: "user", Content: prompt}})
 }
 
-// Chat sends a full message history and returns the complete response.
 func (g *GroqProvider) Chat(messages []Message) (string, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
 	model := os.Getenv("GROQ_MODEL")
@@ -60,8 +58,6 @@ func (g *GroqProvider) Chat(messages []Message) (string, error) {
 	return out.Choices[0].Message.Content, nil
 }
 
-// Stream sends a full message history and writes tokens into out as they arrive.
-// Uses the OpenAI-compatible SSE format that Groq supports.
 func (g *GroqProvider) Stream(messages []Message, out chan<- string) error {
 	defer close(out)
 
@@ -94,25 +90,20 @@ func (g *GroqProvider) Stream(messages []Message, out chan<- string) error {
 	}
 	defer res.Body.Close()
 
-	// Groq streams as SSE lines: "data: {...}" or "data: [DONE]"
 	scanner := bufio.NewScanner(res.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
-
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-
 		payload := strings.TrimPrefix(line, "data: ")
 		if payload == "[DONE]" {
 			break
 		}
-
 		var chunk groqStreamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
 		}
-
 		if len(chunk.Choices) > 0 {
 			token := chunk.Choices[0].Delta.Content
 			if token != "" {
@@ -123,8 +114,6 @@ func (g *GroqProvider) Stream(messages []Message, out chan<- string) error {
 
 	return scanner.Err()
 }
-
-// -- internal types --
 
 type groqRequest struct {
 	Model    string        `json:"model"`

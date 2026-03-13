@@ -3,16 +3,18 @@ package tools
 import "fmt"
 
 // Tool is the contract every tool must implement.
-// Name() is used by the planner to dispatch to the right tool.
 type Tool interface {
 	Name() string
 	Run(input string) (string, error)
 }
 
 // registry holds all available tools keyed by name.
-var registry = map[string]Tool{
-	"get_project":    &GetProjectTool{},
-	"filter_by_tech": &FilterByTechTool{},
+var registry = map[string]Tool{}
+
+// Register adds or replaces a tool in the registry by its Name().
+// Called at startup in main.go for each tool.
+func Register(t Tool) {
+	registry[t.Name()] = t
 }
 
 // Get returns the tool matching the given name.

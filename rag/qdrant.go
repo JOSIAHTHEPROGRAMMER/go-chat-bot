@@ -47,7 +47,6 @@ func (c *qdrantClient) do(method, path string, body any) (*http.Response, error)
 
 func (c *qdrantClient) EnsureCollection() error {
 	path := fmt.Sprintf("/collections/%s", c.collection)
-	//	fmt.Printf("Qdrant URL=%s Collection=%s\n", c.url, c.collection)
 
 	res, err := c.do("GET", path, nil)
 	if err != nil {
@@ -56,13 +55,17 @@ func (c *qdrantClient) EnsureCollection() error {
 	res.Body.Close()
 
 	if res.StatusCode == http.StatusOK {
-		fmt.Println("Qdrant collection already exists")
-		return nil
+		// Collection exists — delete and recreate to guarantee correct vector dimensions.
+		delRes, err := c.do("DELETE", path, nil)
+		if err != nil {
+			return err
+		}
+		delRes.Body.Close()
 	}
 
 	payload := map[string]any{
 		"vectors": map[string]any{
-			"size":     3072,
+			"size":     3072, // gemini-embedding-001 output dimension
 			"distance": "Cosine",
 		},
 	}
@@ -77,7 +80,6 @@ func (c *qdrantClient) EnsureCollection() error {
 		return fmt.Errorf("failed to create Qdrant collection: status %d", res.StatusCode)
 	}
 
-	fmt.Println("Qdrant collection created")
 	return nil
 }
 
@@ -103,15 +105,9 @@ func (c *qdrantClient) Upsert(doc Doc) error {
 	}
 	defer res.Body.Close()
 
-	raw, _ := io.ReadAll(res.Body)
-
 	if res.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("qdrant upsert failed: status %d body: %s", res.StatusCode, string(raw))
-	}
-
-	// Log first upsert response to confirm structure
-	if doc.Path == "ai-study-extension-server" {
-		fmt.Printf("Upsert response for %s: %s\n", doc.Path, string(raw))
 	}
 
 	return nil
@@ -175,7 +171,6 @@ func (c *qdrantClient) Scroll() ([]Doc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scroll read error: %w", err)
 	}
-	fmt.Printf("Scroll raw response (first 500 chars): %.500s\n", string(raw))
 
 	var result struct {
 		Result struct {

@@ -22,71 +22,58 @@ const (
 	PlanTool   PlanType = "tool"
 )
 
-// Plan is the planner's decision for a given question.
 type Plan struct {
 	Type     PlanType
-	Messages []llm.Message // full message slice ready to pass to provider.Chat()
+	Messages []llm.Message
 }
 
-// classifyResponse is what we expect the LLM to return during classification.
 type classifyResponse struct {
 	Type  string `json:"type"`
 	Tool  string `json:"tool"`
 	Input string `json:"input"`
 }
 
-const classifyPrompt = `You are a routing assistant. Your only job is to output one JSON object and nothing else.
+// classifyPrompt is intentionally compact — fewer tokens = faster Groq response.
+// Four valid outputs only. Any deviation defaults to RAG.
+const classifyPrompt = `Output one JSON object only. No markdown. No explanation.
 
-STEP 1 - Read the question carefully.
-STEP 2 - Pick exactly one of the four outputs below. No other output is valid.
+Rules:
+- Greeting or off-topic → {"type":"direct"}
+- General skills/background/experience → {"type":"rag"}
+- Which projects use a language or technology (Go, Python, React, etc.) → {"type":"tool","tool":"filter_by_tech","input":"<technology, lowercase>"}
+- Question about a specific named project → {"type":"tool","tool":"get_project","input":"<project name>"}
 
-OUTPUT A - greetings, small talk, or questions unrelated to the developer portfolio:
-{"type":"direct"}
-
-OUTPUT B - general questions about the developer's skills, background, or experience:
-{"type":"rag"}
-
-OUTPUT C - question asks which projects use a specific programming language or technology.
-A technology is something like: JavaScript, Go, Python, React, TypeScript, CSS, SQL.
-A technology is NOT a project name.
-Use one technology only - if multiple are mentioned pick the most specific one.
-{"type":"tool","tool":"filter_by_tech","input":"<single technology name, lowercase>"}
-
-OUTPUT D - question asks about a specific named project (e.g. tell me about Neura, what is CaribCart):
-{"type":"tool","tool":"get_project","input":"<exact project name, preserve original casing>"}
-
-STRICT RULES:
-- Output only raw JSON, no markdown, no explanation, no extra text
-- The only valid values for "tool" are exactly: "filter_by_tech" or "get_project" - nothing else
-- "filter_by_tech" is ONLY for programming languages and technologies, never for project names
-- "get_project" is ONLY for named projects, never for languages or technologies
-- Never combine multiple technologies into one input string
-- If you are unsure, use OUTPUT B
+Only "filter_by_tech" or "get_project" are valid tool names.
+filter_by_tech = languages/tech only. get_project = named projects only.
+When unsure → {"type":"rag"}
 
 Question: %s`
 
 // Build classifies the question and returns a Plan with a ready-to-send message slice.
-// history contains prior turns in the conversation, may be empty for the first message.
 func Build(ctx context.Context, question string, history []llm.Message, provider llm.Provider) (Plan, error) {
 	raw, err := provider.Complete(fmt.Sprintf(classifyPrompt, question))
 	if err != nil {
 		return Plan{}, fmt.Errorf("classification failed: %w", err)
 	}
 
-	// Strip any markdown fences the LLM might add despite being told not to
+	// Strip markdown fences the LLM might add despite being told not to
 	cleaned := strings.TrimSpace(raw)
 	cleaned = strings.TrimPrefix(cleaned, "```json")
 	cleaned = strings.TrimPrefix(cleaned, "```")
 	cleaned = strings.TrimSuffix(cleaned, "```")
 	cleaned = strings.TrimSpace(cleaned)
 
+	// Extract just the first JSON object in case the LLM adds trailing text
+	if idx := strings.Index(cleaned, "}"); idx != -1 {
+		cleaned = cleaned[:idx+1]
+	}
+
 	var classification classifyResponse
 	if err := json.Unmarshal([]byte(cleaned), &classification); err != nil {
-		fmt.Printf("planner: parse failed (%v), defaulting to rag\n", err)
+		fmt.Printf("planner: parse failed (%v), defaulting to rag. raw=%q\n", err, raw)
 		classification.Type = "rag"
 	}
 
-	// Validate tool name before dispatching - prevents hallucinated tool names from erroring
 	if PlanType(classification.Type) == PlanTool {
 		if classification.Tool != "filter_by_tech" && classification.Tool != "get_project" {
 			fmt.Printf("planner: invalid tool %q, defaulting to rag\n", classification.Tool)
@@ -116,7 +103,9 @@ func Build(ctx context.Context, question string, history []llm.Message, provider
 			return buildRAGPlan(ctx, question, history)
 		}
 
-		writeLog(ctx, PlanTool, 1)
+		matchCount := countToolMatches(classification.Tool, result)
+		writeLog(ctx, PlanTool, matchCount)
+
 		return Plan{
 			Type:     PlanTool,
 			Messages: buildMessages(result, question, history),
@@ -127,9 +116,31 @@ func Build(ctx context.Context, question string, history []llm.Message, provider
 	}
 }
 
-// buildRAGPlan runs similarity search and builds a RAG-based plan.
+func countToolMatches(toolName, result string) int {
+	if toolName == "get_project" {
+		return 1
+	}
+	var n int
+	if _, err := fmt.Sscanf(extractParenthetical(result), "%d total", &n); err == nil && n > 0 {
+		return n
+	}
+	return strings.Count(result, "### ")
+}
+
+func extractParenthetical(s string) string {
+	start := strings.Index(s, "(")
+	end := strings.Index(s, ")")
+	if start == -1 || end == -1 || end <= start {
+		return ""
+	}
+	return s[start+1 : end]
+}
+
+// buildRAGPlan fetches top-5 semantically similar docs and builds a RAG plan.
+// k=5 balances context richness vs prompt size — each doc is capped at 1500 chars
+// in GetContextString so total context stays well within token limits.
 func buildRAGPlan(ctx context.Context, question string, history []llm.Message) (Plan, error) {
-	docs, err := rag.SearchTopK(question, 6)
+	docs, err := rag.SearchTopK(question, 5)
 	if err != nil {
 		return Plan{}, fmt.Errorf("RAG search failed: %w", err)
 	}
@@ -142,28 +153,23 @@ func buildRAGPlan(ctx context.Context, question string, history []llm.Message) (
 }
 
 // buildMessages assembles the full message slice for provider.Chat().
-// Structure: system prompt, history, current user message with optional context.
-func buildMessages(context, question string, history []llm.Message) []llm.Message {
-	// Neither Groq nor Gemini support a dedicated system role in all configurations,
-	// so we prepend it as a user turn followed by an assistant acknowledgement.
+// System prompt is sent as a proper system role — both Groq and Gemini support this.
+func buildMessages(contextStr, question string, history []llm.Message) []llm.Message {
 	messages := []llm.Message{
-		{Role: "user", Content: config.SystemPrompt},
-		{Role: "assistant", Content: "Understood. I will follow these guidelines."},
+		{Role: "system", Content: config.SystemPrompt},
 	}
 
 	messages = append(messages, history...)
 
 	userContent := question
-	if context != "" {
-		userContent = fmt.Sprintf("Context:\n%s\n\nQuestion:\n%s", context, question)
+	if contextStr != "" {
+		userContent = fmt.Sprintf("Context:\n%s\nQuestion: %s", contextStr, question)
 	}
 
 	messages = append(messages, llm.Message{Role: "user", Content: userContent})
 	return messages
 }
 
-// writeLog records the plan decision into the request-scoped logger.
-// Safe to call with a context that has no logger attached.
 func writeLog(ctx context.Context, planType PlanType, docCount int) {
 	if rl := logger.FromContext(ctx); rl != nil {
 		rl.PlanType = string(planType)

@@ -11,102 +11,127 @@ import (
 	"time"
 
 	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/config"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/fetcher"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/llm"
 	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/middleware"
 	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/rag"
 	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/routes"
 	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/session"
+	"github.com/JOSIAHTHEPROGRAMMER/go-chat-bot/tools"
+
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	godotenv.Load()
+	fmt.Println("Server starting...")
+
+	_ = godotenv.Load()
+
+	// Embedder — Gemini
+
+	llm.RegisterEmbedder(&llm.GeminiEmbedder{})
+	fmt.Println("Gemini embedder registered")
+
+	// LLM — start on Groq, rotates to Gemini every 6 hours
 
 	config.SetCurrentModel("groq")
-	fmt.Println("Server starting...")
-	fmt.Println("Initial model:", config.GetCurrentModel())
+	fmt.Println("Active provider: groq")
 
-	// Connect to MongoDB
+	// MongoDB
+
 	if err := session.Connect(); err != nil {
-		log.Fatal("Failed to connect to MongoDB:", err)
+		log.Fatalf("MongoDB connect failed: %v", err)
 	}
 	fmt.Println("MongoDB connected")
 
-	// Initialize the Qdrant collection - creates it if it does not exist yet
+	// Qdrant
+
 	if err := rag.InitStore(); err != nil {
-		log.Fatal("Failed to initialize Qdrant store:", err)
+		log.Fatalf("Qdrant init failed: %v", err)
 	}
 	fmt.Println("Qdrant store ready")
 
-	// Embed all READMEs and upsert into Qdrant on every startup.
-	// Upserts are idempotent so re-running is safe and keeps data fresh.
-	docs, err := rag.EmbedAllReadmes()
+	// GitHub ingestion + embedding
+
+	docs, err := fetcher.FetchREADMEs()
 	if err != nil {
-		log.Fatal("Failed to generate initial embeddings:", err)
+		log.Fatalf("GitHub fetch failed: %v", err)
 	}
-	fmt.Printf("Embedded %d docs into Qdrant\n", len(docs))
+	fmt.Printf("Fetched %d READMEs from GitHub\n", len(docs))
 
-	go autoUpdateRoutine()
+	embedded, err := rag.EmbedAndStore(docs)
+	if err != nil {
+		log.Fatalf("Embedding failed: %v", err)
+	}
+	fmt.Printf("Embedded %d docs into Qdrant\n", embedded)
 
-	// /health is unauthenticated and not rate limited so Render can reach it freely
-	http.HandleFunc("/health", middleware.CORS(routes.HealthHandler))
-	http.HandleFunc("/chat", middleware.Chain(routes.ChatHandler))
-	http.HandleFunc("/stream", middleware.Chain(routes.StreamHandler))
+	// Tools
 
-	// Render injects PORT - fall back to 8080 for local development
+	tools.Register(&tools.GetProjectTool{})
+	tools.Register(&tools.FilterByTechTool{})
+
+	// Refresh embeddings + rotate provider every 6 hours
+
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if config.GetCurrentModel() == "groq" {
+				config.SetCurrentModel("gemini")
+			} else {
+				config.SetCurrentModel("groq")
+			}
+			fmt.Println("Switched provider to:", config.GetCurrentModel())
+
+			fmt.Println("Refreshing embeddings...")
+			refreshDocs, err := fetcher.FetchREADMEs()
+			if err != nil {
+				fmt.Printf("refresh fetch failed: %v\n", err)
+				continue
+			}
+			count, err := rag.EmbedAndStore(refreshDocs)
+			if err != nil {
+				fmt.Printf("refresh embed failed: %v\n", err)
+				continue
+			}
+			fmt.Printf("Refreshed %d docs\n", count)
+		}
+	}()
+
+	// HTTP routes
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", middleware.CORS(routes.HealthHandler))
+	mux.HandleFunc("/chat", middleware.Chain(routes.ChatHandler))
+	mux.HandleFunc("/stream", middleware.Chain(routes.StreamHandler))
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	server := &http.Server{Addr: ":" + port}
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: mux,
+	}
 
-	// Listen for SIGTERM and SIGINT so we can drain in-flight requests before exit.
-	// Render sends SIGTERM when it stops or redeploys the service.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
 		fmt.Printf("Server running on port %s\n", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("Server error:", err)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
 		}
 	}()
 
-	// Block until a signal is received
 	<-quit
-	fmt.Println("Shutting down - draining in-flight requests...")
+	fmt.Println("Shutting down...")
 
-	// Give in-flight requests up to 15 seconds to complete
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatal("Forced shutdown:", err)
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("forced shutdown: %v", err)
 	}
-
-	fmt.Println("Server stopped cleanly")
-}
-
-func autoUpdateRoutine() {
-	ticker := time.NewTicker(6 * time.Hour)
-	for range ticker.C {
-		switchModel()
-		fmt.Println("Switched model to:", config.GetCurrentModel())
-
-		docs, err := rag.EmbedAllReadmes()
-		if err != nil {
-			fmt.Println("Error updating embeddings:", err)
-			continue
-		}
-		fmt.Printf("Refreshed %d docs in Qdrant\n", len(docs))
-	}
-}
-
-// switchModel alternates between Groq and Gemini on each tick.
-func switchModel() {
-	if config.GetCurrentModel() == "groq" {
-		config.SetCurrentModel("gemini")
-	} else {
-		config.SetCurrentModel("groq")
-	}
+	fmt.Println("Server stopped")
 }

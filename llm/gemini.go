@@ -92,22 +92,16 @@ func (g *GeminiProvider) Stream(messages []Message, out chan<- string) error {
 	}
 	defer res.Body.Close()
 
-	// Gemini streams as newline-delimited JSON objects inside an array
 	scanner := bufio.NewScanner(res.Body)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-
-		// Skip array brackets and empty lines
 		if line == "" || line == "[" || line == "]" || line == "," {
 			continue
 		}
-
-		// Each line is a full geminiResponse object
 		var chunk geminiResponse
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 			continue
 		}
-
 		if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
 			token := chunk.Candidates[0].Content.Parts[0].Text
 			if token != "" {
@@ -135,8 +129,6 @@ func toGeminiContents(messages []Message) []geminiContent {
 	}
 	return contents
 }
-
-// -- internal types --
 
 type geminiRequest struct {
 	Contents []geminiContent `json:"contents"`

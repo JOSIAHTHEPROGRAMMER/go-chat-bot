@@ -7,12 +7,24 @@ var registry = map[string]Provider{
 	"gemini": &GeminiProvider{},
 }
 
-// Get returns the Provider matching the given name.
-// Falls back to Groq if the name is unrecognized.
+var activeEmbedder Embedder
+
 func Get(name string) (Provider, error) {
 	p, ok := registry[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown provider: %q", name)
 	}
 	return p, nil
+}
+
+func Register(p Provider) {
+	registry[p.Name()] = p
+}
+
+func RegisterEmbedder(e Embedder) {
+	activeEmbedder = e
+}
+
+func GetEmbedder() Embedder {
+	return activeEmbedder
 }

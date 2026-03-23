@@ -158,6 +158,7 @@ Unauthenticated. Used by Render for uptime monitoring.
 | Variable            | Required   | Description                                              |
 | ------------------- | ---------- | -------------------------------------------------------- |
 | `GROQ_API_KEY`      | Yes        | Groq API key                                             |
+| `MODEL_NAME`        | Yes        | Model name e.g `Jerry`                                   |
 | `GROQ_MODEL`        | Yes        | Groq model name e.g. `llama-3.1-8b-instant`              |
 | `GEMINI_API_KEY`    | Yes        | Google Gemini API key                                    |
 | `GEMINI_MODEL`      | Yes        | Gemini model name e.g. `gemini-1.5-flash`                |

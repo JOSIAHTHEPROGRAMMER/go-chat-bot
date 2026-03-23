@@ -64,3 +64,4 @@ profile.out
 # --- Tests ---
 /tmp/
 test-results/
+docs.json

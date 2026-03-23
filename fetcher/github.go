@@ -22,7 +22,7 @@ type Doc struct {
 func buildIgnoreList() map[string]bool {
 	ignored := make(map[string]bool)
 	if val := os.Getenv("IGNORED_REPOS"); val != "" {
-		for _, name := range strings.Split(val, ",") {
+		for name := range strings.SplitSeq(val, ",") {
 			name = strings.TrimSpace(name)
 			if name != "" {
 				ignored[name] = true

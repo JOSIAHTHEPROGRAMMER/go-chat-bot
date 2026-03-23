@@ -59,6 +59,13 @@ func main() {
 	}
 	fmt.Printf("Fetched %d READMEs from GitHub\n", len(docs))
 
+	// file, _ := os.Create("docs.json")
+	// defer file.Close()
+
+	// json.NewEncoder(file).Encode(docs)
+
+	// fmt.Println("Exported docs.json")
+
 	embedded, err := rag.EmbedAndStore(docs)
 	if err != nil {
 		log.Fatalf("Embedding failed: %v", err)
